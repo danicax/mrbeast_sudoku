@@ -239,6 +239,21 @@ export default function App() {
     puzzle.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const uniquePuzzleCount = React.useMemo(() => {
+    const seen = new Set();
+
+    puzzles.forEach((puzzle) => {
+      if (!Array.isArray(puzzle.rows) || puzzle.rows.length !== 9) return;
+      if (puzzle.errors?.length) return;
+      const key = puzzle.rows.map((row) => row.join("")).join("");
+      if (key.length === 81) {
+        seen.add(key);
+      }
+    });
+
+    return seen.size;
+  }, [puzzles]);
+
   const puzzleNames = puzzles.map((puzzle) => puzzle.name);
   const numericNames = puzzleNames
     .map((name) => Number.parseInt(name, 10))
@@ -295,6 +310,7 @@ export default function App() {
         <div className="stats-row">
           <span className="stat low">Lowest: {lowestName || "—"}</span>
           <span className="stat high">Highest: {highestName || "—"}</span>
+          <span className="stat">Unique: {loading ? "—" : uniquePuzzleCount}</span>
         </div>
         
         <input
