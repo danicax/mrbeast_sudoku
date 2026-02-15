@@ -1,6 +1,9 @@
 import React from "react";
 
-const baseSudokuUrl = new URL("sudokus/", window.location.href);
+const baseSudokuUrl = new URL(
+  "sudokus/",
+  new URL(import.meta.env.BASE_URL, window.location.href)
+);
 
 function parsePuzzle(text) {
   const lines = text
@@ -268,17 +271,6 @@ export default function App() {
       <header className="header">
         <h1>Sudoku Viewer</h1>
         <p>For the Mr Beast challenge.</p>
-        <div className="stats-row">
-          <span className="stat low">Lowest: {lowestName || "—"}</span>
-          <span className="stat high">Highest: {highestName || "—"}</span>
-        </div>
-        <input
-          className="search-input"
-          type="search"
-          placeholder="Search by puzzle name..."
-          value={searchTerm}
-          onChange={(event) => setSearchTerm(event.target.value)}
-        />
         <p className="contribute-link">
           To contribute more sudokus, make a PR here{" "}
           <a
@@ -289,6 +281,19 @@ export default function App() {
             https://github.com/danicax/mrbeast_sudoku/tree/main/public/sudokus
           </a>
         </p>
+        <div className="stats-row">
+          <span className="stat low">Lowest: {lowestName || "—"}</span>
+          <span className="stat high">Highest: {highestName || "—"}</span>
+        </div>
+        
+        <input
+          className="search-input"
+          type="search"
+          placeholder="Search by puzzle name..."
+          value={searchTerm}
+          onChange={(event) => setSearchTerm(event.target.value)}
+        />
+        
       </header>
       {loading && <div className="loading">Loading puzzles...</div>}
       <section className="puzzle-list">
