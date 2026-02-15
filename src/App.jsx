@@ -15,8 +15,18 @@ function parsePuzzle(text) {
   const errors = [];
 
   lines.forEach((line, index) => {
-    const matches = line.match(/\d+/g) || [];
-    const numbers = matches.map((value) => Number.parseInt(value, 10));
+    const digitChars = line.match(/\d/g) || [];
+    const groupedMatches = line.match(/\d+/g) || [];
+    const groupedNumbers = groupedMatches.map((value) =>
+      Number.parseInt(value, 10)
+    );
+    const numbers =
+      digitChars.length > 0 && digitChars.length <= 9
+        ? [
+            ...digitChars.map((value) => Number.parseInt(value, 10)),
+            ...Array.from({ length: 9 - digitChars.length }, () => 0),
+          ]
+        : groupedNumbers;
 
     if (numbers.length === 0) {
       return;
