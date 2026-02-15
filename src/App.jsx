@@ -76,9 +76,15 @@ function SudokuGrid({ rows, baseRows }) {
   return <div className="grid">{cells}</div>;
 }
 
-function PuzzleCard({ puzzle, onOpen }) {
+function PuzzleCard({ puzzle, onOpen, isLowest, isHighest }) {
   return (
-    <button className="puzzle-card preview" type="button" onClick={onOpen}>
+    <button
+      className={`puzzle-card preview ${isLowest ? "low" : ""} ${
+        isHighest ? "high" : ""
+      }`}
+      type="button"
+      onClick={onOpen}
+    >
       <h2 className="puzzle-title">{puzzle.name}</h2>
       <SudokuGrid rows={puzzle.rows} />
       {puzzle.errors.length > 0 && (
@@ -273,6 +279,16 @@ export default function App() {
           value={searchTerm}
           onChange={(event) => setSearchTerm(event.target.value)}
         />
+        <p className="contribute-link">
+          To contribute more sudokus, make a PR here{" "}
+          <a
+            href="https://github.com/danicax/mrbeast_sudoku/tree/main/public/sudokus"
+            target="_blank"
+            rel="noreferrer"
+          >
+            https://github.com/danicax/mrbeast_sudoku/tree/main/public/sudokus
+          </a>
+        </p>
       </header>
       {loading && <div className="loading">Loading puzzles...</div>}
       <section className="puzzle-list">
@@ -281,6 +297,8 @@ export default function App() {
             key={puzzle.name}
             puzzle={puzzle}
             onOpen={() => setActivePuzzleName(puzzle.name)}
+            isLowest={puzzle.name === lowestName}
+            isHighest={puzzle.name === highestName}
           />
         ))}
       </section>

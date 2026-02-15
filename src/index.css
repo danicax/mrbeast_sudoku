@@ -56,6 +56,22 @@ body {
   font-size: 14px;
 }
 
+.contribute-link {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #4b5563;
+}
+
+.contribute-link a {
+  color: #2563eb;
+  text-decoration: none;
+  word-break: break-word;
+}
+
+.contribute-link a:hover {
+  text-decoration: underline;
+}
+
 .puzzle-list {
   display: grid;
   gap: 20px;
@@ -76,6 +92,16 @@ body {
   text-align: left;
   cursor: pointer;
   width: 100%;
+}
+
+.puzzle-card.low {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+}
+
+.puzzle-card.high {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
 }
 
 .puzzle-title {
