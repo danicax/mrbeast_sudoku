@@ -384,20 +384,7 @@ export default function App() {
     };
   }, [manifest, page, totalPages, isSearching, filteredManifest]);
 
-  const uniquePuzzleCount = React.useMemo(() => {
-    const seen = new Set();
-
-    puzzles.forEach((puzzle) => {
-      if (!Array.isArray(puzzle.rows) || puzzle.rows.length !== 9) return;
-      if (puzzle.errors?.length) return;
-      const key = puzzle.rows.map((row) => row.join("")).join("");
-      if (key.length === 81) {
-        seen.add(key);
-      }
-    });
-
-    return seen.size;
-  }, [puzzles]);
+  const uniquePuzzleCount = manifest.length;
 
   const puzzleNames = manifest.map((puzzle) => puzzle.name);
   const numericNames = puzzleNames
@@ -486,7 +473,7 @@ export default function App() {
           <span className="stat low">Lowest: {lowestName || "—"}</span>
           <span className="stat high">Highest: {highestName || "—"}</span>
           <span className="stat">
-            Unique (page): {loading ? "—" : uniquePuzzleCount}
+            Unique: {loading ? "—" : uniquePuzzleCount}
           </span>
           {isSearching ? (
             <span className="stat">Matches: {filteredManifest.length}</span>
