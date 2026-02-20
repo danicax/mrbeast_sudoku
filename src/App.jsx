@@ -178,41 +178,98 @@ function solveSudoku(rows) {
   return { solution: board, error: null };
 }
 
+function renderSolutionPng({ solution, baseRows, name }) {
+  if (!solution || solution.length !== 9) return;
+
+  const cellSize = 40;
+  const gridSize = cellSize * 9;
+  const margin = 16;
+  const canvasSize = gridSize + margin * 2;
+  const ratio = window.devicePixelRatio || 1;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = canvasSize * ratio;
+  canvas.height = canvasSize * ratio;
+  canvas.style.width = `${canvasSize}px`;
+  canvas.style.height = `${canvasSize}px`;
+
+  const ctx = canvas.getContext("2d");
+  ctx.scale(ratio, ratio);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvasSize, canvasSize);
+
+  ctx.translate(margin, margin);
+
+  ctx.fillStyle = "#111827";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = "20px system-ui, -apple-system, sans-serif";
+
+  for (let row = 0; row < 9; row += 1) {
+    for (let col = 0; col < 9; col += 1) {
+      const value = solution[row][col];
+      const baseValue = baseRows?.[row]?.[col] ?? 0;
+      if (!value) continue;
+
+      ctx.fillStyle = baseValue ? "#111827" : "#1d4ed8";
+      ctx.fillText(
+        String(value),
+        col * cellSize + cellSize / 2,
+        row * cellSize + cellSize / 2
+      );
+    }
+  }
+
+  for (let i = 0; i <= 9; i += 1) {
+    const isThick = i % 3 === 0;
+    ctx.strokeStyle = "#111827";
+    ctx.lineWidth = isThick ? 2 : 1;
+
+    ctx.beginPath();
+    ctx.moveTo(0, i * cellSize);
+    ctx.lineTo(gridSize, i * cellSize);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(i * cellSize, 0);
+    ctx.lineTo(i * cellSize, gridSize);
+    ctx.stroke();
+  }
+
+  const link = document.createElement("a");
+  link.download = `${name || "sudoku"}-solution.png`;
+  link.href = canvas.toDataURL("image/png");
+  link.click();
+}
+
 export default function App() {
+  const [manifest, setManifest] = React.useState([]);
   const [puzzles, setPuzzles] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [activePuzzleName, setActivePuzzleName] = React.useState(null);
   const [solutions, setSolutions] = React.useState({});
   const [solveErrors, setSolveErrors] = React.useState({});
   const [searchTerm, setSearchTerm] = React.useState("");
+  const [page, setPage] = React.useState(1);
+  const pageSize = 60;
+  const puzzleCacheRef = React.useRef(new Map());
 
   React.useEffect(() => {
     let alive = true;
 
-    async function loadPuzzles() {
+    async function loadManifest() {
       try {
         const manifestResponse = await fetch(
           new URL("index.json", baseSudokuUrl)
         );
-        const manifest = await manifestResponse.json();
-
-        const loaded = await Promise.all(
-          manifest.map(async (entry) => {
-            const response = await fetch(new URL(entry.file, baseSudokuUrl));
-            const text = await response.text();
-            const parsed = parsePuzzle(text);
-            return {
-              ...entry,
-              ...parsed,
-            };
-          })
-        );
+        const manifestJson = await manifestResponse.json();
 
         if (alive) {
-          setPuzzles(loaded);
+          setManifest(manifestJson);
         }
       } catch (error) {
         if (alive) {
+          setManifest([]);
           setPuzzles([
             {
               name: "Load error",
@@ -228,16 +285,76 @@ export default function App() {
       }
     }
 
-    loadPuzzles();
+    loadManifest();
 
     return () => {
       alive = false;
     };
   }, []);
 
-  const filteredPuzzles = puzzles.filter((puzzle) =>
-    puzzle.name.toLowerCase().includes(searchTerm.toLowerCase())
+  React.useEffect(() => {
+    let alive = true;
+
+    async function loadPagePuzzles() {
+      if (!manifest.length) return;
+      setLoading(true);
+
+      const filteredManifest = manifest.filter((entry) =>
+        entry.name.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+      const totalPages = Math.max(
+        1,
+        Math.ceil(filteredManifest.length / pageSize)
+      );
+      const safePage = Math.min(page, totalPages);
+      if (safePage !== page) {
+        setPage(safePage);
+      }
+
+      const start = (safePage - 1) * pageSize;
+      const entries = filteredManifest.slice(start, start + pageSize);
+
+      const loaded = await Promise.all(
+        entries.map(async (entry) => {
+          const cached = puzzleCacheRef.current.get(entry.name);
+          if (cached) return cached;
+          const response = await fetch(new URL(entry.file, baseSudokuUrl));
+          const text = await response.text();
+          const parsed = parsePuzzle(text);
+          const result = { ...entry, ...parsed };
+          puzzleCacheRef.current.set(entry.name, result);
+          return result;
+        })
+      );
+
+      if (alive) {
+        setPuzzles(loaded);
+        setLoading(false);
+      }
+    }
+
+    loadPagePuzzles().catch((error) => {
+      if (alive) {
+        setPuzzles([
+          {
+            name: "Load error",
+            rows: [],
+            errors: [String(error)],
+          },
+        ]);
+        setLoading(false);
+      }
+    });
+
+    return () => {
+      alive = false;
+    };
+  }, [manifest, page, searchTerm]);
+
+  const filteredManifest = manifest.filter((entry) =>
+    entry.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
+  const totalPages = Math.max(1, Math.ceil(filteredManifest.length / pageSize));
 
   const uniquePuzzleCount = React.useMemo(() => {
     const seen = new Set();
@@ -254,7 +371,7 @@ export default function App() {
     return seen.size;
   }, [puzzles]);
 
-  const puzzleNames = puzzles.map((puzzle) => puzzle.name);
+  const puzzleNames = manifest.map((puzzle) => puzzle.name);
   const numericNames = puzzleNames
     .map((name) => Number.parseInt(name, 10))
     .filter((value) => Number.isFinite(value));
@@ -291,6 +408,36 @@ export default function App() {
     }));
   };
 
+  const handleDownloadSolution = () => {
+    if (!activePuzzle) return;
+
+    const existingSolution = solutions[activePuzzle.name];
+    const { solution, error } = existingSolution
+      ? { solution: existingSolution, error: null }
+      : solveSudoku(activePuzzle.rows);
+
+    if (error || !solution) {
+      setSolveErrors((prev) => ({
+        ...prev,
+        [activePuzzle.name]: error || "No solution found.",
+      }));
+      return;
+    }
+
+    if (!existingSolution) {
+      setSolutions((prev) => ({
+        ...prev,
+        [activePuzzle.name]: solution,
+      }));
+    }
+
+    renderSolutionPng({
+      solution,
+      baseRows: activePuzzle.rows,
+      name: activePuzzle.name,
+    });
+  };
+
   return (
     <div className="page">
       <header className="header">
@@ -310,7 +457,12 @@ export default function App() {
         <div className="stats-row">
           <span className="stat low">Lowest: {lowestName || "—"}</span>
           <span className="stat high">Highest: {highestName || "—"}</span>
-          <span className="stat">Unique: {loading ? "—" : uniquePuzzleCount}</span>
+          <span className="stat">
+            Unique (page): {loading ? "—" : uniquePuzzleCount}
+          </span>
+          <span className="stat">
+            Page: {page} / {totalPages}
+          </span>
         </div>
         
         <input
@@ -318,13 +470,34 @@ export default function App() {
           type="search"
           placeholder="Search by puzzle name..."
           value={searchTerm}
-          onChange={(event) => setSearchTerm(event.target.value)}
+          onChange={(event) => {
+            setSearchTerm(event.target.value);
+            setPage(1);
+          }}
         />
         
       </header>
       {loading && <div className="loading">Loading puzzles...</div>}
+      <div className="pagination">
+        <button
+          className="solve-button"
+          type="button"
+          onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+          disabled={page <= 1}
+        >
+          Previous
+        </button>
+        <button
+          className="solve-button"
+          type="button"
+          onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+          disabled={page >= totalPages}
+        >
+          Next
+        </button>
+      </div>
       <section className="puzzle-list">
-        {filteredPuzzles.map((puzzle) => (
+        {puzzles.map((puzzle) => (
           <PuzzleCard
             key={puzzle.name}
             puzzle={puzzle}
@@ -374,6 +547,14 @@ export default function App() {
                 disabled={activePuzzle.errors.length > 0}
               >
                 Solve Sudoku
+              </button>
+              <button
+                className="solve-button"
+                type="button"
+                onClick={handleDownloadSolution}
+                disabled={activePuzzle.errors.length > 0}
+              >
+                Download Solution PNG
               </button>
             </div>
           </div>
