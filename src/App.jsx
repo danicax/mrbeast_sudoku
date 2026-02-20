@@ -250,9 +250,45 @@ export default function App() {
   const [solutions, setSolutions] = React.useState({});
   const [solveErrors, setSolveErrors] = React.useState({});
   const [searchTerm, setSearchTerm] = React.useState("");
+  const [useRegexSearch, setUseRegexSearch] = React.useState(false);
+  const [regexError, setRegexError] = React.useState("");
   const [page, setPage] = React.useState(1);
   const pageSize = 60;
+  const maxSearchResults = 200;
   const puzzleCacheRef = React.useRef(new Map());
+
+  const searchConfig = React.useMemo(() => {
+    const term = searchTerm.trim();
+    if (!term) {
+      return { predicate: () => true, error: "" };
+    }
+
+    if (!useRegexSearch) {
+      const lower = term.toLowerCase();
+      return {
+        predicate: (entry) => entry.name.toLowerCase().includes(lower),
+        error: "",
+      };
+    }
+
+    try {
+      const regex = new RegExp(term, "i");
+      return { predicate: (entry) => regex.test(entry.name), error: "" };
+    } catch (error) {
+      return { predicate: () => false, error: String(error) };
+    }
+  }, [searchTerm, useRegexSearch]);
+
+  React.useEffect(() => {
+    setRegexError(searchConfig.error);
+  }, [searchConfig.error]);
+
+  const filteredManifest = React.useMemo(
+    () => manifest.filter((entry) => searchConfig.predicate(entry)),
+    [manifest, searchConfig]
+  );
+  const isSearching = searchTerm.trim().length > 0;
+  const totalPages = Math.max(1, Math.ceil(filteredManifest.length / pageSize));
 
   React.useEffect(() => {
     let alive = true;
@@ -299,20 +335,17 @@ export default function App() {
       if (!manifest.length) return;
       setLoading(true);
 
-      const filteredManifest = manifest.filter((entry) =>
-        entry.name.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-      const totalPages = Math.max(
-        1,
-        Math.ceil(filteredManifest.length / pageSize)
-      );
       const safePage = Math.min(page, totalPages);
       if (safePage !== page) {
         setPage(safePage);
       }
 
-      const start = (safePage - 1) * pageSize;
-      const entries = filteredManifest.slice(start, start + pageSize);
+      const entries = isSearching
+        ? filteredManifest.slice(0, maxSearchResults)
+        : filteredManifest.slice(
+            (safePage - 1) * pageSize,
+            safePage * pageSize
+          );
 
       const loaded = await Promise.all(
         entries.map(async (entry) => {
@@ -349,12 +382,7 @@ export default function App() {
     return () => {
       alive = false;
     };
-  }, [manifest, page, searchTerm]);
-
-  const filteredManifest = manifest.filter((entry) =>
-    entry.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-  const totalPages = Math.max(1, Math.ceil(filteredManifest.length / pageSize));
+  }, [manifest, page, totalPages, isSearching, filteredManifest]);
 
   const uniquePuzzleCount = React.useMemo(() => {
     const seen = new Set();
@@ -460,9 +488,13 @@ export default function App() {
           <span className="stat">
             Unique (page): {loading ? "—" : uniquePuzzleCount}
           </span>
-          <span className="stat">
-            Page: {page} / {totalPages}
-          </span>
+          {isSearching ? (
+            <span className="stat">Matches: {filteredManifest.length}</span>
+          ) : (
+            <span className="stat">
+              Page: {page} / {totalPages}
+            </span>
+          )}
         </div>
         
         <input
@@ -475,27 +507,46 @@ export default function App() {
             setPage(1);
           }}
         />
+        <label className="contribute-link">
+          <input
+            type="checkbox"
+            checked={useRegexSearch}
+            onChange={(event) => setUseRegexSearch(event.target.checked)}
+          />{" "}
+          Use regex
+        </label>
+        {regexError && (
+          <div className="error">Regex error: {regexError}</div>
+        )}
+        {isSearching && filteredManifest.length > maxSearchResults && (
+          <p className="contribute-link">
+            Showing first {maxSearchResults} results. Refine your search to narrow
+            the list.
+          </p>
+        )}
         
       </header>
       {loading && <div className="loading">Loading puzzles...</div>}
-      <div className="pagination">
-        <button
-          className="solve-button"
-          type="button"
-          onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-          disabled={page <= 1}
-        >
-          Previous
-        </button>
-        <button
-          className="solve-button"
-          type="button"
-          onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
-          disabled={page >= totalPages}
-        >
-          Next
-        </button>
-      </div>
+      {!isSearching && (
+        <div className="pagination">
+          <button
+            className="solve-button"
+            type="button"
+            onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+            disabled={page <= 1}
+          >
+            Previous
+          </button>
+          <button
+            className="solve-button"
+            type="button"
+            onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+            disabled={page >= totalPages}
+          >
+            Next
+          </button>
+        </div>
+      )}
       <section className="puzzle-list">
         {puzzles.map((puzzle) => (
           <PuzzleCard
