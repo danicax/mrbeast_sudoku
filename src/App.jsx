@@ -89,7 +89,7 @@ function SudokuGrid({ rows, baseRows }) {
   return <div className="grid">{cells}</div>;
 }
 
-function PuzzleCard({ puzzle, onOpen, isLowest, isHighest }) {
+function PuzzleCard({ puzzle, rows, onOpen, isLowest, isHighest }) {
   return (
     <button
       className={`puzzle-card preview ${isLowest ? "low" : ""} ${
@@ -99,7 +99,7 @@ function PuzzleCard({ puzzle, onOpen, isLowest, isHighest }) {
       onClick={onOpen}
     >
       <h2 className="puzzle-title">{puzzle.name}</h2>
-      <SudokuGrid rows={puzzle.rows} />
+      <SudokuGrid rows={rows} baseRows={puzzle.rows} />
       {puzzle.errors.length > 0 && (
         <div className="error">{puzzle.errors.join(" ")}</div>
       )}
@@ -253,6 +253,7 @@ export default function App() {
   const [useRegexSearch, setUseRegexSearch] = React.useState(false);
   const [regexError, setRegexError] = React.useState("");
   const [page, setPage] = React.useState(1);
+  const [showSolved, setShowSolved] = React.useState(false);
   const pageSize = 60;
   const maxSearchResults = 200;
   const puzzleCacheRef = React.useRef(new Map());
@@ -384,6 +385,27 @@ export default function App() {
     };
   }, [manifest, page, totalPages, isSearching, filteredManifest]);
 
+  React.useEffect(() => {
+    if (!showSolved || !puzzles.length) return;
+
+    const newSolutions = {};
+    const newErrors = {};
+
+    puzzles.forEach((puzzle) => {
+      if (solutions[puzzle.name] || puzzle.errors.length > 0) return;
+      const { solution, error } = solveSudoku(puzzle.rows);
+      if (solution) newSolutions[puzzle.name] = solution;
+      if (error) newErrors[puzzle.name] = error;
+    });
+
+    if (Object.keys(newSolutions).length > 0) {
+      setSolutions((prev) => ({ ...prev, ...newSolutions }));
+    }
+    if (Object.keys(newErrors).length > 0) {
+      setSolveErrors((prev) => ({ ...prev, ...newErrors }));
+    }
+  }, [showSolved, puzzles, solutions]);
+
   const uniquePuzzleCount = manifest.length;
 
   const puzzleNames = manifest.map((puzzle) => puzzle.name);
@@ -497,6 +519,14 @@ export default function App() {
         <label className="contribute-link">
           <input
             type="checkbox"
+            checked={showSolved}
+            onChange={(event) => setShowSolved(event.target.checked)}
+          />{" "}
+          Show solved
+        </label>
+        <label className="contribute-link">
+          <input
+            type="checkbox"
             checked={useRegexSearch}
             onChange={(event) => setUseRegexSearch(event.target.checked)}
           />{" "}
@@ -539,6 +569,11 @@ export default function App() {
           <PuzzleCard
             key={puzzle.name}
             puzzle={puzzle}
+            rows={
+              showSolved && solutions[puzzle.name]
+                ? solutions[puzzle.name]
+                : puzzle.rows
+            }
             onOpen={() => setActivePuzzleName(puzzle.name)}
             isLowest={puzzle.name === lowestName}
             isHighest={puzzle.name === highestName}
