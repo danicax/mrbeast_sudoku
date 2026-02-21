@@ -405,6 +405,59 @@ function parsePairs(text) {
   return { pairs, error: "" };
 }
 
+function parseCycleNotation(text) {
+  const trimmed = text.trim();
+  if (!trimmed) return { pairs: [], error: "" };
+
+  const cycles = [];
+  const cycleRegex = /\(([^)]+)\)/g;
+  let match = cycleRegex.exec(trimmed);
+
+  while (match) {
+    cycles.push(match[1]);
+    match = cycleRegex.exec(trimmed);
+  }
+
+  const errorMessage = "Use cycle notation like (1 2 3)(4 5).";
+  if (!cycles.length) {
+    return { pairs: [], error: errorMessage };
+  }
+
+  const leftover = trimmed.replace(cycleRegex, "").trim();
+  if (leftover.replace(/[,\s]/g, "") !== "") {
+    return { pairs: [], error: errorMessage };
+  }
+
+  const pairs = [];
+  for (const cycleText of cycles) {
+    const parts = cycleText.trim().split(/[\s,]+/).filter(Boolean);
+    if (!parts.length) {
+      return { pairs: [], error: errorMessage };
+    }
+
+    const values = [];
+    for (const part of parts) {
+      if (!/^[1-9]$/.test(part)) {
+        return { pairs: [], error: errorMessage };
+      }
+      values.push(Number.parseInt(part, 10));
+    }
+
+    if (values.length < 2) {
+      continue;
+    }
+
+    for (let index = 0; index < values.length; index += 1) {
+      pairs.push({
+        from: values[index],
+        to: values[(index + 1) % values.length],
+      });
+    }
+  }
+
+  return { pairs, error: "" };
+}
+
 function validatePermutationPairs(pairs) {
   const fromSet = new Set();
   const toSet = new Set();
@@ -694,8 +747,14 @@ export default function App() {
     () => parsePairs(manualMapInput),
     [manualMapInput]
   );
-  const parsedRowMapping = React.useMemo(() => parsePairs(rowMapInput), [rowMapInput]);
-  const parsedColMapping = React.useMemo(() => parsePairs(colMapInput), [colMapInput]);
+  const parsedRowMapping = React.useMemo(
+    () => parseCycleNotation(rowMapInput),
+    [rowMapInput]
+  );
+  const parsedColMapping = React.useMemo(
+    () => parseCycleNotation(colMapInput),
+    [colMapInput]
+  );
 
   const rowMapError = parsedRowMapping.error
     ? parsedRowMapping.error
@@ -1144,7 +1203,7 @@ export default function App() {
                   />
                 </label>
                 <label className="transform-field">
-                  Manual map (e.g. 6 8,5-7)
+                  Relabel (e.g. 6 8,5-7)
                   <input
                     type="text"
                     value={manualMapInput}
@@ -1156,7 +1215,7 @@ export default function App() {
                   <div className="error">{parsedManualMapping.error}</div>
                 )}
                 <label className="transform-field">
-                  Row map (e.g. 1 2,2-3,3 1)
+                  Row map (e.g. (1 2 3)(4 5))
                   <input
                     type="text"
                     value={rowMapInput}
@@ -1166,7 +1225,7 @@ export default function App() {
                 </label>
                 {rowMapError && <div className="error">{rowMapError}</div>}
                 <label className="transform-field">
-                  Column map (e.g. 1 2,2-3,3 1)
+                  Column map (e.g. (1 2 3)(4 5))
                   <input
                     type="text"
                     value={colMapInput}
