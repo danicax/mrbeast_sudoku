@@ -49,13 +49,21 @@ function parsePuzzle(text) {
   };
 }
 
-function SudokuGrid({ rows, baseRows }) {
+function SudokuGrid({
+  rows,
+  baseRows,
+  overlayRows,
+  highlightBorder,
+  highlightedMask,
+  onCellClick,
+}) {
   const cells = [];
 
   for (let rowIndex = 0; rowIndex < 9; rowIndex += 1) {
     for (let colIndex = 0; colIndex < 9; colIndex += 1) {
       const value = rows?.[rowIndex]?.[colIndex] ?? 0;
       const baseValue = baseRows?.[rowIndex]?.[colIndex] ?? 0;
+      const overlayValue = overlayRows?.[rowIndex]?.[colIndex] ?? 0;
       const classes = ["cell"];
 
       if (!value) {
@@ -77,19 +85,33 @@ function SudokuGrid({ rows, baseRows }) {
       if (colIndex === 8) {
         classes.push("thick-right");
       }
+      if (highlightedMask?.[rowIndex]?.[colIndex]) {
+        classes.push("cell-linked-highlight");
+      }
 
       cells.push(
-        <div key={`${rowIndex}-${colIndex}`} className={classes.join(" ")}>
-          {value || ""}
+        <div
+          key={`${rowIndex}-${colIndex}`}
+          className={classes.join(" ")}
+          onClick={
+            onCellClick
+              ? () => onCellClick({ rowIndex, colIndex, value })
+              : undefined
+          }
+        >
+          {overlayRows && (
+            <span className="cell-corner">{overlayValue || ""}</span>
+          )}
+          <span className="cell-main">{value || ""}</span>
         </div>
       );
     }
   }
 
-  return <div className="grid">{cells}</div>;
+  return <div className={`grid ${highlightBorder ? "grid-match" : ""}`}>{cells}</div>;
 }
 
-function PuzzleCard({ puzzle, rows, onOpen, isLowest, isHighest }) {
+function PuzzleCard({ puzzle, onOpen, isLowest, isHighest }) {
   return (
     <button
       className={`puzzle-card preview ${isLowest ? "low" : ""} ${
@@ -99,7 +121,7 @@ function PuzzleCard({ puzzle, rows, onOpen, isLowest, isHighest }) {
       onClick={onOpen}
     >
       <h2 className="puzzle-title">{puzzle.name}</h2>
-      <SudokuGrid rows={rows} baseRows={puzzle.rows} />
+      <SudokuGrid rows={puzzle.rows} />
       {puzzle.errors.length > 0 && (
         <div className="error">{puzzle.errors.join(" ")}</div>
       )}
@@ -242,6 +264,202 @@ function renderSolutionPng({ solution, baseRows, name }) {
   link.click();
 }
 
+function cloneBoard(rows) {
+  return rows.map((row) => row.slice());
+}
+
+function applyShift(rows, shiftAmount) {
+  const normalizedShift = ((shiftAmount % 9) + 9) % 9;
+  if (!normalizedShift) return cloneBoard(rows);
+
+  return rows.map((row) =>
+    row.map((value) => {
+      if (!value) return 0;
+      return ((value - 1 + normalizedShift) % 9) + 1;
+    })
+  );
+}
+
+function applyManualMapping(rows, pairs) {
+  if (!pairs.length) return cloneBoard(rows);
+  const digitMap = new Map(pairs.map((pair) => [pair.from, pair.to]));
+  return rows.map((row) =>
+    row.map((value) => {
+      if (!value) return 0;
+      return digitMap.get(value) ?? value;
+    })
+  );
+}
+
+function applyRowMapping(rows, pairs) {
+  if (!pairs.length) return cloneBoard(rows);
+  const source = cloneBoard(rows);
+  const result = cloneBoard(rows);
+  pairs.forEach(({ from, to }) => {
+    result[to - 1] = source[from - 1].slice();
+  });
+  return result;
+}
+
+function applyColumnMapping(rows, pairs) {
+  if (!pairs.length) return cloneBoard(rows);
+  const source = cloneBoard(rows);
+  const result = cloneBoard(rows);
+  pairs.forEach(({ from, to }) => {
+    for (let row = 0; row < 9; row += 1) {
+      result[row][to - 1] = source[row][from - 1];
+    }
+  });
+  return result;
+}
+
+function rotateBoard(rows, degrees) {
+  const normalized = ((degrees % 360) + 360) % 360;
+  if (normalized === 0) return cloneBoard(rows);
+
+  const board = Array.from({ length: 9 }, () => Array(9).fill(0));
+
+  if (normalized === 90) {
+    for (let row = 0; row < 9; row += 1) {
+      for (let col = 0; col < 9; col += 1) {
+        board[row][col] = rows[8 - col][row];
+      }
+    }
+    return board;
+  }
+
+  if (normalized === 180) {
+    for (let row = 0; row < 9; row += 1) {
+      for (let col = 0; col < 9; col += 1) {
+        board[row][col] = rows[8 - row][8 - col];
+      }
+    }
+    return board;
+  }
+
+  for (let row = 0; row < 9; row += 1) {
+    for (let col = 0; col < 9; col += 1) {
+      board[row][col] = rows[col][8 - row];
+    }
+  }
+  return board;
+}
+
+function transposeBoard(rows) {
+  const board = Array.from({ length: 9 }, () => Array(9).fill(0));
+  for (let row = 0; row < 9; row += 1) {
+    for (let col = 0; col < 9; col += 1) {
+      board[row][col] = rows[col][row];
+    }
+  }
+  return board;
+}
+
+function flipBoard(rows, flipMode) {
+  if (flipMode === "none") return cloneBoard(rows);
+
+  if (flipMode === "horizontal") {
+    return rows.map((row) => row.slice().reverse());
+  }
+
+  return cloneBoard(rows).reverse();
+}
+
+function parsePairs(text) {
+  const trimmed = text.trim();
+  if (!trimmed) return { pairs: [], error: "" };
+
+  const chunks = trimmed
+    .split(",")
+    .map((chunk) => chunk.trim())
+    .filter(Boolean);
+
+  if (!chunks.length) {
+    return { pairs: [], error: "Use comma-separated pairs like 1 2,3-4." };
+  }
+
+  const pairs = [];
+  for (const chunk of chunks) {
+    const match = chunk.match(/^([1-9])(?:\s+|-)([1-9])$/);
+    if (!match) {
+      return {
+        pairs: [],
+        error: "Use comma-separated pairs like 1 2,3-4.",
+      };
+    }
+    pairs.push({
+      from: Number.parseInt(match[1], 10),
+      to: Number.parseInt(match[2], 10),
+    });
+  }
+
+  return { pairs, error: "" };
+}
+
+function validatePermutationPairs(pairs) {
+  const fromSet = new Set();
+  const toSet = new Set();
+
+  for (const pair of pairs) {
+    if (fromSet.has(pair.from)) {
+      return "Each source index can only appear once.";
+    }
+    if (toSet.has(pair.to)) {
+      return "Each destination index can only appear once.";
+    }
+    fromSet.add(pair.from);
+    toSet.add(pair.to);
+  }
+
+  return "";
+}
+
+function applyBoardTransforms(rows, options) {
+  let board = cloneBoard(rows);
+
+  board = applyShift(board, options.shiftValue);
+  board = applyManualMapping(board, options.manualPairs);
+  board = applyRowMapping(board, options.rowPairs);
+  board = applyColumnMapping(board, options.colPairs);
+  board = rotateBoard(board, options.rotationDegrees);
+  if (options.useTranspose) {
+    board = transposeBoard(board);
+  }
+  board = flipBoard(board, options.flipMode);
+
+  return board;
+}
+
+function applySpatialTransforms(rows, options) {
+  let board = cloneBoard(rows);
+  board = applyRowMapping(board, options.rowPairs);
+  board = applyColumnMapping(board, options.colPairs);
+  board = rotateBoard(board, options.rotationDegrees);
+  if (options.useTranspose) {
+    board = transposeBoard(board);
+  }
+  board = flipBoard(board, options.flipMode);
+  return board;
+}
+
+function boardsAreEqual(first, second) {
+  if (!first || !second || first.length !== 9 || second.length !== 9) return false;
+  for (let row = 0; row < 9; row += 1) {
+    if (!first[row] || !second[row] || first[row].length !== 9 || second[row].length !== 9) {
+      return false;
+    }
+    for (let col = 0; col < 9; col += 1) {
+      if (first[row][col] !== second[row][col]) return false;
+    }
+  }
+  return true;
+}
+
+function buildValueMask(rows, targetValue) {
+  if (!rows || !targetValue) return null;
+  return rows.map((row) => row.map((value) => value === targetValue));
+}
+
 export default function App() {
   const [manifest, setManifest] = React.useState([]);
   const [puzzles, setPuzzles] = React.useState([]);
@@ -254,6 +472,18 @@ export default function App() {
   const [regexError, setRegexError] = React.useState("");
   const [page, setPage] = React.useState(1);
   const [showSolved, setShowSolved] = React.useState(false);
+  const [shiftInput, setShiftInput] = React.useState("0");
+  const [manualMapInput, setManualMapInput] = React.useState("");
+  const [rowMapInput, setRowMapInput] = React.useState("");
+  const [colMapInput, setColMapInput] = React.useState("");
+  const [rotationDegrees, setRotationDegrees] = React.useState("0");
+  const [useTranspose, setUseTranspose] = React.useState(false);
+  const [flipMode, setFlipMode] = React.useState("none");
+  const [compareInput, setCompareInput] = React.useState("");
+  const [compareName, setCompareName] = React.useState("");
+  const [compareLoading, setCompareLoading] = React.useState(false);
+  const [compareError, setCompareError] = React.useState("");
+  const [selectedPrimaryValue, setSelectedPrimaryValue] = React.useState(null);
   const pageSize = 60;
   const maxSearchResults = 200;
   const puzzleCacheRef = React.useRef(new Map());
@@ -386,25 +616,20 @@ export default function App() {
   }, [manifest, page, totalPages, isSearching, filteredManifest]);
 
   React.useEffect(() => {
-    if (!showSolved || !puzzles.length) return;
-
-    const newSolutions = {};
-    const newErrors = {};
-
-    puzzles.forEach((puzzle) => {
-      if (solutions[puzzle.name] || puzzle.errors.length > 0) return;
-      const { solution, error } = solveSudoku(puzzle.rows);
-      if (solution) newSolutions[puzzle.name] = solution;
-      if (error) newErrors[puzzle.name] = error;
-    });
-
-    if (Object.keys(newSolutions).length > 0) {
-      setSolutions((prev) => ({ ...prev, ...newSolutions }));
-    }
-    if (Object.keys(newErrors).length > 0) {
-      setSolveErrors((prev) => ({ ...prev, ...newErrors }));
-    }
-  }, [showSolved, puzzles, solutions]);
+    setShowSolved(false);
+    setShiftInput("0");
+    setManualMapInput("");
+    setRowMapInput("");
+    setColMapInput("");
+    setRotationDegrees("0");
+    setUseTranspose(false);
+    setFlipMode("none");
+    setCompareInput("");
+    setCompareName("");
+    setCompareError("");
+    setCompareLoading(false);
+    setSelectedPrimaryValue(null);
+  }, [activePuzzleName]);
 
   const uniquePuzzleCount = manifest.length;
 
@@ -430,6 +655,139 @@ export default function App() {
   const activeSolveError = activePuzzle
     ? solveErrors[activePuzzle.name]
     : undefined;
+  const comparePuzzle = compareName ? puzzleCacheRef.current.get(compareName) : null;
+  const compareSolution =
+    comparePuzzle && solutions[comparePuzzle.name]
+      ? solutions[comparePuzzle.name]
+      : undefined;
+  const compareSolveError =
+    comparePuzzle && solveErrors[comparePuzzle.name]
+      ? solveErrors[comparePuzzle.name]
+      : undefined;
+  const shiftValue = Number.parseInt(shiftInput, 10) || 0;
+
+  const parsedManualMapping = React.useMemo(
+    () => parsePairs(manualMapInput),
+    [manualMapInput]
+  );
+  const parsedRowMapping = React.useMemo(() => parsePairs(rowMapInput), [rowMapInput]);
+  const parsedColMapping = React.useMemo(() => parsePairs(colMapInput), [colMapInput]);
+
+  const rowMapError = parsedRowMapping.error
+    ? parsedRowMapping.error
+    : validatePermutationPairs(parsedRowMapping.pairs);
+  const colMapError = parsedColMapping.error
+    ? parsedColMapping.error
+    : validatePermutationPairs(parsedColMapping.pairs);
+
+  const baseDisplayRows =
+    activePuzzle && showSolved && activeSolution ? activeSolution : activePuzzle?.rows;
+  const canApplyTransforms =
+    activePuzzle &&
+    activePuzzle.errors.length === 0 &&
+    !parsedManualMapping.error &&
+    !rowMapError &&
+    !colMapError;
+  const hasActiveTransforms =
+    shiftValue !== 0 ||
+    parsedManualMapping.pairs.length > 0 ||
+    parsedRowMapping.pairs.length > 0 ||
+    parsedColMapping.pairs.length > 0 ||
+    (Number.parseInt(rotationDegrees, 10) || 0) !== 0 ||
+    useTranspose ||
+    flipMode !== "none";
+
+  const transformOptions = React.useMemo(
+    () => ({
+      shiftValue,
+      manualPairs: parsedManualMapping.pairs,
+      rowPairs: parsedRowMapping.pairs,
+      colPairs: parsedColMapping.pairs,
+      rotationDegrees: Number.parseInt(rotationDegrees, 10) || 0,
+      useTranspose,
+      flipMode,
+    }),
+    [
+      shiftValue,
+      parsedManualMapping.pairs,
+      parsedRowMapping.pairs,
+      parsedColMapping.pairs,
+      rotationDegrees,
+      useTranspose,
+      flipMode,
+    ]
+  );
+
+  const transformedRows = React.useMemo(() => {
+    if (!baseDisplayRows) return [];
+    if (!canApplyTransforms) return cloneBoard(baseDisplayRows);
+    return applyBoardTransforms(baseDisplayRows, transformOptions);
+  }, [baseDisplayRows, canApplyTransforms, transformOptions]);
+
+  const transformedBaseRows = React.useMemo(() => {
+    if (!activePuzzle) return [];
+    if (!canApplyTransforms) return cloneBoard(activePuzzle.rows);
+    return applyBoardTransforms(activePuzzle.rows, transformOptions);
+  }, [activePuzzle, canApplyTransforms, transformOptions]);
+
+  const transformedOriginalOverlayRows = React.useMemo(() => {
+    if (!baseDisplayRows || !hasActiveTransforms) return undefined;
+    return applySpatialTransforms(baseDisplayRows, transformOptions);
+  }, [baseDisplayRows, hasActiveTransforms, transformOptions]);
+  const linkedHighlightMask = React.useMemo(
+    () => buildValueMask(transformedRows, selectedPrimaryValue),
+    [transformedRows, selectedPrimaryValue]
+  );
+  const compareBaseRows =
+    comparePuzzle && showSolved && compareSolution
+      ? compareSolution
+      : comparePuzzle?.rows;
+  const isMatchWithCompare =
+    hasActiveTransforms &&
+    compareBaseRows &&
+    comparePuzzle?.errors.length === 0 &&
+    boardsAreEqual(transformedRows, compareBaseRows);
+
+  const handleToggleShowSolved = () => {
+    if (!activePuzzle) return;
+
+    setShowSolved((prev) => {
+      const next = !prev;
+      if (next && !solutions[activePuzzle.name]) {
+        const { solution, error } = solveSudoku(activePuzzle.rows);
+        setSolutions((existing) => ({
+          ...existing,
+          [activePuzzle.name]: solution,
+        }));
+        setSolveErrors((existing) => ({
+          ...existing,
+          [activePuzzle.name]: error,
+        }));
+      }
+      return next;
+    });
+  };
+
+  const handlePrimaryCellClick = ({ value }) => {
+    if (!value) {
+      setSelectedPrimaryValue(null);
+      return;
+    }
+    setSelectedPrimaryValue((prev) => (prev === value ? null : value));
+  };
+
+  React.useEffect(() => {
+    if (!showSolved || !comparePuzzle || solutions[comparePuzzle.name]) return;
+    const { solution, error } = solveSudoku(comparePuzzle.rows);
+    setSolutions((existing) => ({
+      ...existing,
+      [comparePuzzle.name]: solution,
+    }));
+    setSolveErrors((existing) => ({
+      ...existing,
+      [comparePuzzle.name]: error,
+    }));
+  }, [showSolved, comparePuzzle, solutions]);
 
   const handleSolve = () => {
     if (!activePuzzle) return;
@@ -473,6 +831,45 @@ export default function App() {
       baseRows: activePuzzle.rows,
       name: activePuzzle.name,
     });
+  };
+
+  const loadComparePuzzle = async () => {
+    const requestedName = compareInput.trim();
+    if (!requestedName) {
+      setCompareName("");
+      setCompareError("");
+      return;
+    }
+
+    const entry = manifest.find((item) => item.name === requestedName);
+    if (!entry) {
+      setCompareName("");
+      setCompareError("Could not find that sudoku id.");
+      return;
+    }
+
+    const cached = puzzleCacheRef.current.get(entry.name);
+    if (cached) {
+      setCompareName(entry.name);
+      setCompareError("");
+      return;
+    }
+
+    setCompareLoading(true);
+    setCompareError("");
+    try {
+      const response = await fetch(new URL(entry.file, baseSudokuUrl));
+      const text = await response.text();
+      const parsed = parsePuzzle(text);
+      const result = { ...entry, ...parsed };
+      puzzleCacheRef.current.set(entry.name, result);
+      setCompareName(entry.name);
+    } catch (error) {
+      setCompareName("");
+      setCompareError(String(error));
+    } finally {
+      setCompareLoading(false);
+    }
   };
 
   return (
@@ -519,14 +916,6 @@ export default function App() {
         <label className="contribute-link">
           <input
             type="checkbox"
-            checked={showSolved}
-            onChange={(event) => setShowSolved(event.target.checked)}
-          />{" "}
-          Show solved
-        </label>
-        <label className="contribute-link">
-          <input
-            type="checkbox"
             checked={useRegexSearch}
             onChange={(event) => setUseRegexSearch(event.target.checked)}
           />{" "}
@@ -569,11 +958,6 @@ export default function App() {
           <PuzzleCard
             key={puzzle.name}
             puzzle={puzzle}
-            rows={
-              showSolved && solutions[puzzle.name]
-                ? solutions[puzzle.name]
-                : puzzle.rows
-            }
             onOpen={() => setActivePuzzleName(puzzle.name)}
             isLowest={puzzle.name === lowestName}
             isHighest={puzzle.name === highestName}
@@ -604,22 +988,149 @@ export default function App() {
                 Close
               </button>
             </header>
-            <SudokuGrid
-              rows={activeSolution || activePuzzle.rows}
-              baseRows={activePuzzle.rows}
-            />
-            {activePuzzle.errors.length > 0 && (
-              <div className="error">{activePuzzle.errors.join(" ")}</div>
-            )}
-            {activeSolveError && <div className="error">{activeSolveError}</div>}
+            <div className="modal-body">
+              <div className="modal-grid-panel">
+                <div className="compare-controls">
+                  <input
+                    className="search-input"
+                    type="text"
+                    placeholder="Load 2nd sudoku by id..."
+                    value={compareInput}
+                    onChange={(event) => setCompareInput(event.target.value)}
+                  />
+                  <button
+                    className="solve-button"
+                    type="button"
+                    onClick={loadComparePuzzle}
+                    disabled={compareLoading}
+                  >
+                    {compareLoading ? "Loading..." : "Load"}
+                  </button>
+                </div>
+                {compareError && <div className="error">{compareError}</div>}
+                <div className="compare-grids">
+                  <div>
+                    <p className="puzzle-meta">Primary (transformed)</p>
+                    <SudokuGrid
+                      rows={transformedRows}
+                      baseRows={transformedBaseRows}
+                      overlayRows={transformedOriginalOverlayRows}
+                      highlightBorder={isMatchWithCompare}
+                      highlightedMask={linkedHighlightMask}
+                      onCellClick={handlePrimaryCellClick}
+                    />
+                  </div>
+                  <div>
+                    <p className="puzzle-meta">
+                      {comparePuzzle ? `Compare: ${comparePuzzle.name}` : "Compare board"}
+                    </p>
+                    {comparePuzzle ? (
+                      <SudokuGrid
+                        rows={compareBaseRows || comparePuzzle.rows}
+                        baseRows={comparePuzzle.rows}
+                        highlightBorder={isMatchWithCompare}
+                        highlightedMask={linkedHighlightMask}
+                      />
+                    ) : (
+                      <div className="compare-placeholder">
+                        Load another sudoku id to compare.
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {activePuzzle.errors.length > 0 && (
+                  <div className="error">{activePuzzle.errors.join(" ")}</div>
+                )}
+                {activeSolveError && <div className="error">{activeSolveError}</div>}
+                {compareSolveError && <div className="error">{compareSolveError}</div>}
+              </div>
+              <aside className="transform-panel">
+                <h3>Transformations</h3>
+                <label className="transform-field">
+                  Shift numbers
+                  <input
+                    type="number"
+                    value={shiftInput}
+                    onChange={(event) => setShiftInput(event.target.value)}
+                    disabled={activePuzzle.errors.length > 0}
+                  />
+                </label>
+                <label className="transform-field">
+                  Manual map (e.g. 6 8,5-7)
+                  <input
+                    type="text"
+                    value={manualMapInput}
+                    onChange={(event) => setManualMapInput(event.target.value)}
+                    disabled={activePuzzle.errors.length > 0}
+                  />
+                </label>
+                {parsedManualMapping.error && (
+                  <div className="error">{parsedManualMapping.error}</div>
+                )}
+                <label className="transform-field">
+                  Row map (e.g. 1 2,2-3,3 1)
+                  <input
+                    type="text"
+                    value={rowMapInput}
+                    onChange={(event) => setRowMapInput(event.target.value)}
+                    disabled={activePuzzle.errors.length > 0}
+                  />
+                </label>
+                {rowMapError && <div className="error">{rowMapError}</div>}
+                <label className="transform-field">
+                  Column map (e.g. 1 2,2-3,3 1)
+                  <input
+                    type="text"
+                    value={colMapInput}
+                    onChange={(event) => setColMapInput(event.target.value)}
+                    disabled={activePuzzle.errors.length > 0}
+                  />
+                </label>
+                {colMapError && <div className="error">{colMapError}</div>}
+                <label className="transform-field">
+                  Rotation
+                  <select
+                    value={rotationDegrees}
+                    onChange={(event) => setRotationDegrees(event.target.value)}
+                    disabled={activePuzzle.errors.length > 0}
+                  >
+                    <option value="0">0°</option>
+                    <option value="90">90°</option>
+                    <option value="180">180°</option>
+                    <option value="270">270°</option>
+                  </select>
+                </label>
+                <label className="transform-toggle">
+                  <input
+                    type="checkbox"
+                    checked={useTranspose}
+                    onChange={(event) => setUseTranspose(event.target.checked)}
+                    disabled={activePuzzle.errors.length > 0}
+                  />{" "}
+                  Transpose
+                </label>
+                <label className="transform-field">
+                  Mirror
+                  <select
+                    value={flipMode}
+                    onChange={(event) => setFlipMode(event.target.value)}
+                    disabled={activePuzzle.errors.length > 0}
+                  >
+                    <option value="none">None</option>
+                    <option value="horizontal">Horizontal</option>
+                    <option value="vertical">Vertical</option>
+                  </select>
+                </label>
+              </aside>
+            </div>
             <div className="modal-actions">
               <button
                 className="solve-button"
                 type="button"
-                onClick={handleSolve}
+                onClick={handleToggleShowSolved}
                 disabled={activePuzzle.errors.length > 0}
               >
-                Solve Sudoku
+                {showSolved ? "Hide solved" : "Show solved"}
               </button>
               <button
                 className="solve-button"
