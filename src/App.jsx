@@ -111,7 +111,15 @@ function SudokuGrid({
   return <div className={`grid ${highlightBorder ? "grid-match" : ""}`}>{cells}</div>;
 }
 
-function PuzzleCard({ puzzle, onOpen, isLowest, isHighest }) {
+function PuzzleCard({
+  puzzle,
+  onOpen,
+  isLowest,
+  isHighest,
+  displayRows,
+  baseRows,
+  meta,
+}) {
   return (
     <button
       className={`puzzle-card preview ${isLowest ? "low" : ""} ${
@@ -121,7 +129,8 @@ function PuzzleCard({ puzzle, onOpen, isLowest, isHighest }) {
       onClick={onOpen}
     >
       <h2 className="puzzle-title">{puzzle.name}</h2>
-      <SudokuGrid rows={puzzle.rows} />
+      {meta && <p className="puzzle-meta">{meta}</p>}
+      <SudokuGrid rows={displayRows ?? puzzle.rows} baseRows={baseRows} />
       {puzzle.errors.length > 0 && (
         <div className="error">{puzzle.errors.join(" ")}</div>
       )}
@@ -465,6 +474,7 @@ export default function App() {
   const [puzzles, setPuzzles] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [activePuzzleName, setActivePuzzleName] = React.useState(null);
+  const [activeView, setActiveView] = React.useState("browse");
   const [solutions, setSolutions] = React.useState({});
   const [solveErrors, setSolveErrors] = React.useState({});
   const [searchTerm, setSearchTerm] = React.useState("");
@@ -484,7 +494,7 @@ export default function App() {
   const [compareLoading, setCompareLoading] = React.useState(false);
   const [compareError, setCompareError] = React.useState("");
   const [selectedPrimaryValue, setSelectedPrimaryValue] = React.useState(null);
-  const pageSize = 60;
+  const pageSize = activeView === "solved_mod25" ? 18 : 60;
   const maxSearchResults = 200;
   const puzzleCacheRef = React.useRef(new Map());
 
@@ -514,10 +524,19 @@ export default function App() {
     setRegexError(searchConfig.error);
   }, [searchConfig.error]);
 
-  const filteredManifest = React.useMemo(
-    () => manifest.filter((entry) => searchConfig.predicate(entry)),
-    [manifest, searchConfig]
-  );
+  const mod25Manifest = React.useMemo(() => {
+    return manifest.filter((entry) => {
+      const value = Number.parseInt(entry.name, 10);
+      return Number.isFinite(value) && value % 25 === 0;
+    });
+  }, [manifest]);
+
+  const viewManifest = activeView === "solved_mod25" ? mod25Manifest : manifest;
+
+  const filteredManifest = React.useMemo(() => {
+    return viewManifest.filter((entry) => searchConfig.predicate(entry));
+  }, [viewManifest, searchConfig]);
+
   const isSearching = searchTerm.trim().length > 0;
   const totalPages = Math.max(1, Math.ceil(filteredManifest.length / pageSize));
 
@@ -563,7 +582,7 @@ export default function App() {
     let alive = true;
 
     async function loadPagePuzzles() {
-      if (!manifest.length) return;
+      if (!viewManifest.length) return;
       setLoading(true);
 
       const safePage = Math.min(page, totalPages);
@@ -613,10 +632,10 @@ export default function App() {
     return () => {
       alive = false;
     };
-  }, [manifest, page, totalPages, isSearching, filteredManifest]);
+  }, [viewManifest.length, page, totalPages, isSearching, filteredManifest]);
 
   React.useEffect(() => {
-    setShowSolved(false);
+    setShowSolved(activeView === "solved_mod25");
     setShiftInput("0");
     setManualMapInput("");
     setRowMapInput("");
@@ -629,7 +648,11 @@ export default function App() {
     setCompareError("");
     setCompareLoading(false);
     setSelectedPrimaryValue(null);
-  }, [activePuzzleName]);
+  }, [activePuzzleName, activeView]);
+
+  React.useEffect(() => {
+    setPage(1);
+  }, [activeView]);
 
   const uniquePuzzleCount = manifest.length;
 
@@ -646,9 +669,10 @@ export default function App() {
       ? String(Math.max(...numericNames))
       : puzzleNames.slice().sort().slice(-1)[0] || "";
 
-  const activePuzzle = puzzles.find(
-    (puzzle) => puzzle.name === activePuzzleName
-  );
+  const activePuzzle = activePuzzleName
+    ? puzzleCacheRef.current.get(activePuzzleName) ||
+      puzzles.find((puzzle) => puzzle.name === activePuzzleName)
+    : null;
   const activeSolution = activePuzzle
     ? solutions[activePuzzle.name]
     : undefined;
@@ -789,6 +813,29 @@ export default function App() {
     }));
   }, [showSolved, comparePuzzle, solutions]);
 
+  React.useEffect(() => {
+    if (activeView !== "solved_mod25") return;
+    if (!puzzles.length) return;
+
+    const nextSolutions = {};
+    const nextErrors = {};
+
+    for (const puzzle of puzzles) {
+      if (puzzle.errors.length > 0) continue;
+      if (solutions[puzzle.name] || solveErrors[puzzle.name]) continue;
+      const { solution, error } = solveSudoku(puzzle.rows);
+      nextSolutions[puzzle.name] = solution;
+      nextErrors[puzzle.name] = error;
+    }
+
+    if (Object.keys(nextSolutions).length) {
+      setSolutions((existing) => ({ ...existing, ...nextSolutions }));
+    }
+    if (Object.keys(nextErrors).length) {
+      setSolveErrors((existing) => ({ ...existing, ...nextErrors }));
+    }
+  }, [activeView, puzzles, solutions, solveErrors]);
+
   const handleSolve = () => {
     if (!activePuzzle) return;
     const { solution, error } = solveSudoku(activePuzzle.rows);
@@ -894,6 +941,10 @@ export default function App() {
           <span className="stat">
             Unique: {loading ? "—" : uniquePuzzleCount}
           </span>
+          <span className="stat">
+            Showing: {loading ? "—" : filteredManifest.length}
+            {activeView === "solved_mod25" ? " (id % 25 = 0)" : ""}
+          </span>
           {isSearching ? (
             <span className="stat">Matches: {filteredManifest.length}</span>
           ) : (
@@ -902,11 +953,15 @@ export default function App() {
             </span>
           )}
         </div>
-        
+
         <input
           className="search-input"
           type="search"
-          placeholder="Search by puzzle name..."
+          placeholder={
+            activeView === "solved_mod25"
+              ? "Search within id % 25 = 0..."
+              : "Search by puzzle name..."
+          }
           value={searchTerm}
           onChange={(event) => {
             setSearchTerm(event.target.value);
@@ -933,26 +988,48 @@ export default function App() {
         
       </header>
       {loading && <div className="loading">Loading puzzles...</div>}
-      {!isSearching && (
-        <div className="pagination">
+      <div
+        className={`pagination-row ${isSearching ? "pagination-row--solo" : ""}`}
+      >
+        {!isSearching && (
+          <div className="pagination">
+            <button
+              className="solve-button"
+              type="button"
+              onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+              disabled={page <= 1}
+            >
+              Previous
+            </button>
+            <button
+              className="solve-button"
+              type="button"
+              onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+              disabled={page >= totalPages}
+            >
+              Next
+            </button>
+          </div>
+        )}
+        <div className="view-tabs">
           <button
-            className="solve-button"
             type="button"
-            onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-            disabled={page <= 1}
+            className={`solve-button view-tab ${activeView === "browse" ? "active" : ""}`}
+            aria-pressed={activeView === "browse"}
+            onClick={() => setActiveView("browse")}
           >
-            Previous
+            Browse
           </button>
           <button
-            className="solve-button"
             type="button"
-            onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
-            disabled={page >= totalPages}
+            className={`solve-button view-tab ${activeView === "solved_mod25" ? "active" : ""}`}
+            aria-pressed={activeView === "solved_mod25"}
+            onClick={() => setActiveView("solved_mod25")}
           >
-            Next
+            Solved (id % 25 = 0)
           </button>
         </div>
-      )}
+      </div>
       <section className="puzzle-list">
         {puzzles.map((puzzle) => (
           <PuzzleCard
@@ -961,6 +1038,17 @@ export default function App() {
             onOpen={() => setActivePuzzleName(puzzle.name)}
             isLowest={puzzle.name === lowestName}
             isHighest={puzzle.name === highestName}
+            displayRows={
+              activeView === "solved_mod25"
+                ? solutions[puzzle.name] || puzzle.rows
+                : undefined
+            }
+            baseRows={activeView === "solved_mod25" ? puzzle.rows : undefined}
+            meta={
+              activeView === "solved_mod25"
+                ? solveErrors[puzzle.name]
+                : undefined
+            }
           />
         ))}
       </section>
